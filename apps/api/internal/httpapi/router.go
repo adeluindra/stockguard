@@ -24,81 +24,167 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
-func NewRouter(checkReady ReadinessCheck, logger *slog.Logger) http.Handler {
+// Retained for existing BE-1 tests.
+func NewRouter(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+) http.Handler {
+	return newRouter(checkReady, logger, nil)
+}
+
+func NewRouterWithAuth(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+) http.Handler {
+	return newRouter(checkReady, logger, handlers)
+}
+
+func newRouter(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]string{"status": "ok"},
-		})
-	})
-
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-
-		if err := checkReady(ctx); err != nil {
-			logger.Warn("readiness_check_failed", "error", err)
-			requestID, _ := r.Context().Value(requestIDKey{}).(string)
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"error": map[string]any{
-					"code":       "SERVICE_UNAVAILABLE",
-					"message":    "Service is not ready.",
-					"details":    []any{},
-					"request_id": requestID,
+	mux.HandleFunc(
+		"GET /healthz",
+		func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, 200, map[string]any{
+				"data": map[string]string{
+					"status": "ok",
 				},
 			})
-			return
-		}
+		},
+	)
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"data": map[string]string{"status": "ok", "database": "ok"},
-		})
-	})
+	mux.HandleFunc(
+		"GET /readyz",
+		func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(
+				r.Context(),
+				2*time.Second,
+			)
+			defer cancel()
+
+			if err := checkReady(ctx); err != nil {
+				logger.Warn(
+					"readiness_check_failed",
+					"error", err,
+				)
+
+				requestID, _ := r.Context().
+					Value(requestIDKey{}).(string)
+
+				writeJSON(w, 503, map[string]any{
+					"error": map[string]any{
+						"code":       "SERVICE_UNAVAILABLE",
+						"message":    "Service is not ready",
+						"details":    []any{},
+						"request_id": requestID,
+					},
+				})
+				return
+			}
+
+			writeJSON(w, 200, map[string]any{
+				"data": map[string]string{
+					"status":   "ok",
+					"database": "ok",
+				},
+			})
+		},
+	)
+
+	if handlers != nil {
+		handlers.Register(mux)
+	}
 
 	return requestLogging(logger, mux)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
+func writeJSON(
+	w http.ResponseWriter,
+	status int,
+	payload any,
+) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(
+			w,
+			"Internal Server Error",
+			http.StatusInternalServerError,
+		)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+
+	w.Header().Set(
+		"Content-Type",
+		"application/json",
+	)
 	w.Header().Set("Cache-Control", "no-store")
+
 	w.WriteHeader(status)
 	_, _ = w.Write(append(body, '\n'))
 }
 
-func requestLogging(logger *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func requestLogging(
+	logger *slog.Logger,
+	next http.Handler,
+) http.Handler {
+	return http.HandlerFunc(func(
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
 		started := time.Now()
 
 		var randomBytes [12]byte
+
 		if _, err := rand.Read(randomBytes[:]); err != nil {
-			logger.Error("generate_request_id_failed", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]any{
-				"error": map[string]any{
-					"code": "INTERNAL_ERROR", "message": "Internal server error.", "details": []any{},
-				},
+			logger.Error(
+				"request_id_rng_failed",
+				"error", err,
+			)
+
+			writeJSON(w, 500, map[string]any{
+				"error": "Internal server error",
 			})
 			return
 		}
 
-		requestID := hex.EncodeToString(randomBytes[:])
-		w.Header().Set("X-Request-ID", requestID)
-		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		requestID := hex.EncodeToString(
+			randomBytes[:],
+		)
 
-		recorder := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(recorder, r.WithContext(ctx))
+		w.Header().Set(
+			"X-Request-ID",
+			requestID,
+		)
 
-		logger.Info("http_request",
+		ctx := context.WithValue(
+			r.Context(),
+			requestIDKey{},
+			requestID,
+		)
+
+		recorder := &statusWriter{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+		}
+
+		next.ServeHTTP(
+			recorder,
+			r.WithContext(ctx),
+		)
+
+		logger.Info(
+			"http_request",
 			"request_id", requestID,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.status,
-			"duration_ms", time.Since(started).Milliseconds(),
+			"duration_ms",
+			time.Since(started).Milliseconds(),
 		)
 	})
 }

@@ -24,7 +24,6 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
-// Retained for existing BE-1 tests.
 func NewRouter(
 	checkReady ReadinessCheck,
 	logger *slog.Logger,
@@ -97,7 +96,11 @@ func newRouter(
 	)
 
 	if handlers != nil {
+		// Existing BE-2 authentication endpoints.
 		handlers.Register(mux)
+
+		// BE-2F: Admin-only Staff management endpoints.
+		handlers.RegisterStaffRoutes(mux)
 	}
 
 	return requestLogging(logger, mux)
@@ -118,13 +121,10 @@ func writeJSON(
 		return
 	}
 
-	w.Header().Set(
-		"Content-Type",
-		"application/json",
-	)
+	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-
 	w.WriteHeader(status)
+
 	_, _ = w.Write(append(body, '\n'))
 }
 
@@ -152,14 +152,9 @@ func requestLogging(
 			return
 		}
 
-		requestID := hex.EncodeToString(
-			randomBytes[:],
-		)
+		requestID := hex.EncodeToString(randomBytes[:])
 
-		w.Header().Set(
-			"X-Request-ID",
-			requestID,
-		)
+		w.Header().Set("X-Request-ID", requestID)
 
 		ctx := context.WithValue(
 			r.Context(),

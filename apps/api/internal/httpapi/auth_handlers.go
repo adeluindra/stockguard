@@ -193,6 +193,11 @@ func (h *AuthHandler) Register(mux *http.ServeMux) {
 		"POST /api/v1/auth/logout",
 		h.logout,
 	)
+
+	mux.HandleFunc(
+		"POST /api/v1/auth/change-password",
+		h.changePassword,
+	)
 }
 
 func (h *AuthHandler) error(

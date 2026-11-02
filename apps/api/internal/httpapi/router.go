@@ -28,7 +28,10 @@ func NewRouter(
 	checkReady ReadinessCheck,
 	logger *slog.Logger,
 ) http.Handler {
-	return newRouter(checkReady, logger, nil, nil)
+	return newRouter(
+		checkReady, logger,
+		nil, nil, nil,
+	)
 }
 
 func NewRouterWithAuth(
@@ -36,7 +39,10 @@ func NewRouterWithAuth(
 	logger *slog.Logger,
 	handlers *AuthHandler,
 ) http.Handler {
-	return newRouter(checkReady, logger, handlers, nil)
+	return newRouter(
+		checkReady, logger,
+		handlers, nil, nil,
+	)
 }
 
 func NewRouterWithAuthAndProducts(
@@ -46,10 +52,24 @@ func NewRouterWithAuthAndProducts(
 	productStore ProductService,
 ) http.Handler {
 	return newRouter(
+		checkReady, logger,
+		handlers, productStore, nil,
+	)
+}
+
+func NewRouterWithAuthProductsInventory(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+	productStore ProductService,
+	inventoryStore InventoryService,
+) http.Handler {
+	return newRouter(
 		checkReady,
 		logger,
 		handlers,
 		productStore,
+		inventoryStore,
 	)
 }
 
@@ -58,6 +78,7 @@ func newRouter(
 	logger *slog.Logger,
 	handlers *AuthHandler,
 	productStore ProductService,
+	inventoryStore InventoryService,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -121,6 +142,14 @@ func newRouter(
 				productStore,
 			)
 		}
+
+		if inventoryStore != nil {
+			RegisterInventoryRoutes(
+				mux,
+				handlers,
+				inventoryStore,
+			)
+		}
 	}
 
 	return requestLogging(logger, mux)
@@ -172,7 +201,9 @@ func requestLogging(
 			return
 		}
 
-		requestID := hex.EncodeToString(randomBytes[:])
+		requestID := hex.EncodeToString(
+			randomBytes[:],
+		)
 
 		w.Header().Set("X-Request-ID", requestID)
 

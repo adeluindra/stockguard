@@ -17,6 +17,7 @@ import (
 	"github.com/adeluindra/stockguard/apps/api/internal/auth"
 	"github.com/adeluindra/stockguard/apps/api/internal/httpapi"
 	"github.com/adeluindra/stockguard/apps/api/internal/inventory"
+	"github.com/adeluindra/stockguard/apps/api/internal/orders"
 	"github.com/adeluindra/stockguard/apps/api/internal/products"
 )
 
@@ -110,6 +111,7 @@ func run(logger *slog.Logger) error {
 	sessions := auth.NewSessionStore(db)
 	productStore := products.NewStore(db)
 	inventoryStore := inventory.NewStore(db)
+	orderStore := orders.NewService(db)
 
 	authHandler, err := httpapi.NewAuthHandler(
 		users,
@@ -126,12 +128,13 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.NewRouterWithAuthProductsInventory(
+		Handler: httpapi.NewRouterWithAuthProductsInventoryOrders(
 			checkReady,
 			logger,
 			authHandler,
 			productStore,
 			inventoryStore,
+			orderStore,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,

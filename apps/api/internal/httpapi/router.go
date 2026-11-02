@@ -30,7 +30,7 @@ func NewRouter(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		nil, nil, nil,
+		nil, nil, nil, nil,
 	)
 }
 
@@ -41,7 +41,7 @@ func NewRouterWithAuth(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		handlers, nil, nil,
+		handlers, nil, nil, nil,
 	)
 }
 
@@ -53,7 +53,7 @@ func NewRouterWithAuthAndProducts(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		handlers, productStore, nil,
+		handlers, productStore, nil, nil,
 	)
 }
 
@@ -65,11 +65,26 @@ func NewRouterWithAuthProductsInventory(
 	inventoryStore InventoryService,
 ) http.Handler {
 	return newRouter(
+		checkReady, logger,
+		handlers, productStore, inventoryStore, nil,
+	)
+}
+
+func NewRouterWithAuthProductsInventoryOrders(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+	productStore ProductService,
+	inventoryStore InventoryService,
+	orderStore OrderService,
+) http.Handler {
+	return newRouter(
 		checkReady,
 		logger,
 		handlers,
 		productStore,
 		inventoryStore,
+		orderStore,
 	)
 }
 
@@ -79,6 +94,7 @@ func newRouter(
 	handlers *AuthHandler,
 	productStore ProductService,
 	inventoryStore InventoryService,
+	orderStore OrderService,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -137,17 +153,19 @@ func newRouter(
 
 		if productStore != nil {
 			RegisterProductRoutes(
-				mux,
-				handlers,
-				productStore,
+				mux, handlers, productStore,
 			)
 		}
 
 		if inventoryStore != nil {
 			RegisterInventoryRoutes(
-				mux,
-				handlers,
-				inventoryStore,
+				mux, handlers, inventoryStore,
+			)
+		}
+
+		if orderStore != nil {
+			RegisterOrderRoutes(
+				mux, handlers, orderStore,
 			)
 		}
 	}
@@ -172,8 +190,8 @@ func writeJSON(
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
 
+	w.WriteHeader(status)
 	_, _ = w.Write(append(body, '\n'))
 }
 

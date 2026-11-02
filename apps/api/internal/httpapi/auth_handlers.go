@@ -35,20 +35,19 @@ type AccountFinder interface {
 }
 
 type SessionManager interface {
-	Create(
-		context.Context,
-		int64,
-	) (string, time.Time, error)
-
-	Authenticate(
-		context.Context,
-		string,
-	) (auth.SessionIdentity, error)
-
+	Create(context.Context, int64) (string, time.Time, error)
+	Authenticate(context.Context, string) (auth.SessionIdentity, error)
 	Revoke(context.Context, string) error
 }
 
-// Local-development login throttling.
+type verifiedSessionCreator interface {
+	CreateVerified(
+		context.Context,
+		int64,
+		string,
+	) (string, time.Time, error)
+}
+
 type loginWindow struct {
 	count int
 	until time.Time
@@ -146,8 +145,6 @@ func NewAuthHandler(
 		)
 	}
 
-	// Avoid skipping password verification timing
-	// when the username does not exist.
 	dummyHash, err := auth.HashPassword(
 		"stockguard-invalid-account-placeholder",
 	)
@@ -173,27 +170,22 @@ func (h *AuthHandler) Register(mux *http.ServeMux) {
 		"GET /api/v1/auth/login-csrf",
 		h.loginCSRF,
 	)
-
 	mux.HandleFunc(
 		"POST /api/v1/auth/login",
 		h.login,
 	)
-
 	mux.HandleFunc(
 		"GET /api/v1/auth/me",
 		h.me,
 	)
-
 	mux.HandleFunc(
 		"GET /api/v1/auth/csrf",
 		h.sessionCSRF,
 	)
-
 	mux.HandleFunc(
 		"POST /api/v1/auth/logout",
 		h.logout,
 	)
-
 	mux.HandleFunc(
 		"POST /api/v1/auth/change-password",
 		h.changePassword,
@@ -220,10 +212,7 @@ func (h *AuthHandler) error(
 	})
 }
 
-// Require a same-origin browser request for unsafe actions.
-func (h *AuthHandler) sameOrigin(
-	r *http.Request,
-) bool {
+func (h *AuthHandler) sameOrigin(r *http.Request) bool {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		return origin == h.origin
 	}
@@ -236,8 +225,8 @@ func (h *AuthHandler) sameOrigin(
 	parsed, err := url.Parse(referer)
 
 	return err == nil &&
-		parsed.Scheme+"://"+parsed.Host == h.origin &&
-		parsed.User == nil
+		parsed.User == nil &&
+		parsed.Scheme+"://"+parsed.Host == h.origin
 }
 
 func newCSRFNonce() (string, error) {
@@ -252,18 +241,13 @@ func newCSRFNonce() (string, error) {
 	), nil
 }
 
-// GET /api/v1/auth/login-csrf
 func (h *AuthHandler) loginCSRF(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
 	token, err := newCSRFNonce()
-
 	if err != nil {
-		h.logger.Error(
-			"csrf_rng_failed",
-			"error", err,
-		)
+		h.logger.Error("csrf_rng_failed", "error", err)
 		h.error(
 			w, r, 500,
 			"INTERNAL_ERROR",
@@ -355,7 +339,6 @@ func readLoginRequest(
 	}
 
 	var trailing any
-
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return "", "", errors.New(
 			"unexpected trailing JSON",
@@ -372,7 +355,6 @@ func readLoginRequest(
 	return payload.Username, payload.Password, nil
 }
 
-// POST /api/v1/auth/login
 func (h *AuthHandler) login(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -387,7 +369,6 @@ func (h *AuthHandler) login(
 	}
 
 	username, password, err := readLoginRequest(w, r)
-
 	if err != nil {
 		h.error(
 			w, r, 400,
@@ -413,8 +394,7 @@ func (h *AuthHandler) login(
 	defer cancel()
 
 	user, findErr := h.users.FindActiveByUsername(
-		ctx,
-		username,
+		ctx, username,
 	)
 
 	if findErr != nil &&
@@ -423,7 +403,6 @@ func (h *AuthHandler) login(
 			"login_lookup_failed",
 			"error", findErr,
 		)
-
 		h.error(
 			w, r, 503,
 			"SERVICE_UNAVAILABLE",
@@ -433,7 +412,6 @@ func (h *AuthHandler) login(
 	}
 
 	encodedHash := h.dummyHash
-
 	if findErr == nil {
 		encodedHash = user.PasswordHash
 	}
@@ -448,7 +426,6 @@ func (h *AuthHandler) login(
 			"login_password_hash_invalid",
 			"error", verifyErr,
 		)
-
 		h.error(
 			w, r, 503,
 			"SERVICE_UNAVAILABLE",
@@ -466,12 +443,31 @@ func (h *AuthHandler) login(
 		return
 	}
 
-	token, expiresAt, err := h.sessions.Create(
+	// Security-critical: never fall back to unbound
+	// session creation for password-based login.
+	creator, ok := h.sessions.(verifiedSessionCreator)
+	if !ok {
+		h.logger.Error(
+			"verified_session_creator_not_configured",
+		)
+		h.error(
+			w, r, 503,
+			"SERVICE_UNAVAILABLE",
+			"Service unavailable",
+		)
+		return
+	}
+
+	// Recheck the exact hash verified above under
+	// a PostgreSQL row lock before creating a session.
+	token, expiresAt, err := creator.CreateVerified(
 		ctx,
 		user.ID,
+		user.PasswordHash,
 	)
 
-	if errors.Is(err, auth.ErrInactiveUser) {
+	if errors.Is(err, auth.ErrCredentialsChanged) ||
+		errors.Is(err, auth.ErrInactiveUser) {
 		h.error(
 			w, r, 401,
 			"INVALID_CREDENTIALS",
@@ -485,7 +481,6 @@ func (h *AuthHandler) login(
 			"session_create_failed",
 			"error", err,
 		)
-
 		h.error(
 			w, r, 503,
 			"SERVICE_UNAVAILABLE",
@@ -502,7 +497,6 @@ func (h *AuthHandler) login(
 			h.secureCookies,
 		),
 	)
-
 	h.clearLoginCSRF(w)
 
 	writeJSON(w, 200, map[string]any{
@@ -515,8 +509,6 @@ func (h *AuthHandler) login(
 	})
 }
 
-// CSRF token is bound to the random session token.
-// The session token itself remains HttpOnly.
 func csrfFromSessionToken(token string) string {
 	mac := hmac.New(
 		sha256.New,
@@ -578,7 +570,6 @@ func (h *AuthHandler) currentIdentity(
 			"session_auth_failed",
 			"error", err,
 		)
-
 		h.error(
 			w, r, 503,
 			"SERVICE_UNAVAILABLE",
@@ -590,7 +581,6 @@ func (h *AuthHandler) currentIdentity(
 	return identity, token, true
 }
 
-// GET /api/v1/auth/me
 func (h *AuthHandler) me(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -610,7 +600,6 @@ func (h *AuthHandler) me(
 	})
 }
 
-// GET /api/v1/auth/csrf
 func (h *AuthHandler) sessionCSRF(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -637,7 +626,6 @@ func (h *AuthHandler) sessionCSRFValid(
 	)
 }
 
-// POST /api/v1/auth/logout
 func (h *AuthHandler) logout(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -652,7 +640,6 @@ func (h *AuthHandler) logout(
 	}
 
 	token, err := h.sessionToken(r)
-
 	if err != nil {
 		http.SetCookie(
 			w,
@@ -672,14 +659,12 @@ func (h *AuthHandler) logout(
 	}
 
 	err = h.sessions.Revoke(r.Context(), token)
-
 	if err != nil &&
 		!errors.Is(err, auth.ErrInvalidSession) {
 		h.logger.Error(
 			"session_revoke_failed",
 			"error", err,
 		)
-
 		h.error(
 			w, r, 503,
 			"SERVICE_UNAVAILABLE",
@@ -692,13 +677,11 @@ func (h *AuthHandler) logout(
 		w,
 		auth.ClearSessionCookie(h.secureCookies),
 	)
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
 type identityContextKey struct{}
 
-// Allows business handlers to access the authenticated user.
 func IdentityFromContext(
 	ctx context.Context,
 ) (auth.SessionIdentity, bool) {
@@ -709,8 +692,6 @@ func IdentityFromContext(
 	return identity, ok
 }
 
-// Protect applies authentication, authorization, and CSRF
-// protection to future business routes.
 func (h *AuthHandler) Protect(
 	role string,
 	next http.Handler,
@@ -746,16 +727,15 @@ func (h *AuthHandler) Protect(
 			r.Method != http.MethodHead &&
 			r.Method != http.MethodOptions
 
-		if unsafe {
-			if !h.sameOrigin(r) ||
-				!h.sessionCSRFValid(r, token) {
-				h.error(
-					w, r, 403,
-					"CSRF_INVALID",
-					"Request forbidden",
-				)
-				return
-			}
+		if unsafe &&
+			(!h.sameOrigin(r) ||
+				!h.sessionCSRFValid(r, token)) {
+			h.error(
+				w, r, 403,
+				"CSRF_INVALID",
+				"Request forbidden",
+			)
+			return
 		}
 
 		ctx := context.WithValue(

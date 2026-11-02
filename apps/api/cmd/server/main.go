@@ -16,6 +16,7 @@ import (
 
 	"github.com/adeluindra/stockguard/apps/api/internal/auth"
 	"github.com/adeluindra/stockguard/apps/api/internal/httpapi"
+	"github.com/adeluindra/stockguard/apps/api/internal/products"
 )
 
 const minimumSchemaVersion = 4
@@ -106,6 +107,7 @@ func run(logger *slog.Logger) error {
 
 	users := auth.NewUserStore(db)
 	sessions := auth.NewSessionStore(db)
+	productStore := products.NewStore(db)
 
 	authHandler, err := httpapi.NewAuthHandler(
 		users,
@@ -114,7 +116,6 @@ func run(logger *slog.Logger) error {
 		origin,
 		secureCookies,
 	)
-
 	if err != nil {
 		return fmt.Errorf(
 			"configure authentication: %w", err,
@@ -123,10 +124,11 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.NewRouterWithAuth(
+		Handler: httpapi.NewRouterWithAuthAndProducts(
 			checkReady,
 			logger,
 			authHandler,
+			productStore,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -163,20 +165,23 @@ func run(logger *slog.Logger) error {
 		stop()
 		logger.Info("shutdown_started")
 
-		shutdownCtx, shutdownCancel :=
-			context.WithTimeout(
-				context.Background(),
-				10*time.Second,
-			)
+		shutdownCtx, shutdownCancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
 		defer shutdownCancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+			return fmt.Errorf(
+				"graceful shutdown: %w", err,
+			)
 		}
 
 		if err := <-serverErrors; err != nil &&
 			!errors.Is(err, http.ErrServerClosed) {
-			return err
+			return fmt.Errorf(
+				"HTTP server stopped: %w", err,
+			)
 		}
 
 		logger.Info("shutdown_completed")

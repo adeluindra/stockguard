@@ -28,7 +28,7 @@ func NewRouter(
 	checkReady ReadinessCheck,
 	logger *slog.Logger,
 ) http.Handler {
-	return newRouter(checkReady, logger, nil)
+	return newRouter(checkReady, logger, nil, nil)
 }
 
 func NewRouterWithAuth(
@@ -36,13 +36,28 @@ func NewRouterWithAuth(
 	logger *slog.Logger,
 	handlers *AuthHandler,
 ) http.Handler {
-	return newRouter(checkReady, logger, handlers)
+	return newRouter(checkReady, logger, handlers, nil)
+}
+
+func NewRouterWithAuthAndProducts(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+	productStore ProductService,
+) http.Handler {
+	return newRouter(
+		checkReady,
+		logger,
+		handlers,
+		productStore,
+	)
 }
 
 func newRouter(
 	checkReady ReadinessCheck,
 	logger *slog.Logger,
 	handlers *AuthHandler,
+	productStore ProductService,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -96,11 +111,16 @@ func newRouter(
 	)
 
 	if handlers != nil {
-		// Existing BE-2 authentication endpoints.
 		handlers.Register(mux)
-
-		// BE-2F: Admin-only Staff management endpoints.
 		handlers.RegisterStaffRoutes(mux)
+
+		if productStore != nil {
+			RegisterProductRoutes(
+				mux,
+				handlers,
+				productStore,
+			)
+		}
 	}
 
 	return requestLogging(logger, mux)

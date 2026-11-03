@@ -42,6 +42,25 @@ func RegisterOrderRoutes(
 		store: store,
 	}
 
+	// BE-5C: both Admin and Staff may read orders,
+	// but the query service enforces ownership for Staff.
+	mux.Handle(
+		"GET /api/v1/orders",
+		authHandler.Protect(
+			"",
+			http.HandlerFunc(h.listOrders),
+		),
+	)
+
+	mux.Handle(
+		"GET /api/v1/orders/{id}",
+		authHandler.Protect(
+			"",
+			http.HandlerFunc(h.getOrder),
+		),
+	)
+
+	// BE-5A: atomic order reservation.
 	mux.Handle(
 		"POST /api/v1/orders",
 		authHandler.Protect(
@@ -50,6 +69,7 @@ func RegisterOrderRoutes(
 		),
 	)
 
+	// BE-5B: Admin-only terminal transitions.
 	mux.Handle(
 		"POST /api/v1/orders/{id}/fulfill",
 		authHandler.Protect(
@@ -144,7 +164,9 @@ func (h *orderHandler) create(
 		return
 	}
 
-	key, err := orders.NormalizeIdempotencyKey(keys[0])
+	key, err := orders.NormalizeIdempotencyKey(
+		keys[0],
+	)
 	if err != nil {
 		h.failure(w, r, err)
 		return
@@ -173,6 +195,7 @@ func (h *orderHandler) create(
 		key,
 		payload.Items,
 	)
+
 	if err != nil {
 		h.failure(w, r, err)
 		return
@@ -276,7 +299,7 @@ func (h *orderHandler) transition(
 		return
 	}
 
-	// These endpoints accept an empty body only.
+	// Terminal action endpoints accept an empty body only.
 	r.Body = http.MaxBytesReader(w, r.Body, 1)
 
 	body, err := io.ReadAll(r.Body)

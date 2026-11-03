@@ -33,6 +33,17 @@ type InventoryService interface {
 	) (inventory.MovementPage, error)
 }
 
+type IdempotentInventoryService interface {
+	AdjustIdempotent(
+		context.Context,
+		int64,
+		int64,
+		int64,
+		string,
+		string,
+	) (inventory.IdempotentAdjustment, error)
+}
+
 type inventoryHandler struct {
 	auth  *AuthHandler
 	store InventoryService
@@ -104,6 +115,22 @@ func (h *inventoryHandler) failure(
 			http.StatusBadRequest,
 			"INVALID_INVENTORY_REQUEST",
 			"Invalid inventory request",
+		)
+
+	case errors.Is(err, inventory.ErrInvalidAdjustmentKey):
+		h.auth.error(
+			w, r,
+			http.StatusBadRequest,
+			"INVALID_IDEMPOTENCY_KEY",
+			"Invalid or missing Idempotency-Key",
+		)
+
+	case errors.Is(err, inventory.ErrAdjustmentKeyConflict):
+		h.auth.error(
+			w, r,
+			http.StatusConflict,
+			"IDEMPOTENCY_CONFLICT",
+			"Idempotency key was used for another adjustment",
 		)
 
 	case errors.Is(err, inventory.ErrProductNotFound):
@@ -197,18 +224,26 @@ func (h *inventoryHandler) adjust(
 		return
 	}
 
+	keys := r.Header.Values("Idempotency-Key")
+	if len(keys) != 1 {
+		h.failure(w, r, inventory.ErrInvalidAdjustmentKey)
+		return
+	}
+
+	key, err := inventory.NormalizeAdjustmentKey(keys[0])
+	if err != nil {
+		h.failure(w, r, err)
+		return
+	}
+
 	var payload struct {
 		Delta  *int64 `json:"delta"`
 		Reason string `json:"reason"`
 	}
 
-	if err := decodeProductJSON(
-		w, r, &payload,
-	); err != nil || payload.Delta == nil {
-		h.failure(
-			w, r,
-			inventory.ErrInvalidAdjustment,
-		)
+	if err := decodeProductJSON(w, r, &payload); err != nil ||
+		payload.Delta == nil {
+		h.failure(w, r, inventory.ErrInvalidAdjustment)
 		return
 	}
 
@@ -231,18 +266,35 @@ func (h *inventoryHandler) adjust(
 		return
 	}
 
+	// Fail closed: never fall back to a non-idempotent
+	// adjustment when the service is misconfigured.
+	service, ok := h.store.(IdempotentInventoryService)
+	if !ok {
+		h.auth.logger.Error(
+			"idempotent_inventory_service_not_configured",
+		)
+		h.auth.error(
+			w, r,
+			http.StatusServiceUnavailable,
+			"SERVICE_UNAVAILABLE",
+			"Service unavailable",
+		)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(
 		r.Context(),
 		10*time.Second,
 	)
 	defer cancel()
 
-	result, err := h.store.Adjust(
+	result, err := service.AdjustIdempotent(
 		ctx,
 		id,
 		identity.UserID,
 		*payload.Delta,
 		payload.Reason,
+		key,
 	)
 
 	if err != nil {
@@ -251,7 +303,8 @@ func (h *inventoryHandler) adjust(
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data": result,
+		"data":     result.AdjustmentResult,
+		"replayed": result.Replayed,
 	})
 }
 

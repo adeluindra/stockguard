@@ -157,6 +157,14 @@ func TestInventoryRoutesRBACAndCSRF(t *testing.T) {
 			"application/json",
 		)
 
+		if method == http.MethodPost &&
+			strings.HasSuffix(path, "/adjustments") {
+			req.Header.Set(
+				"Idempotency-Key",
+				"11111111-1111-4111-8111-111111111111",
+			)
+		}
+
 		if csrf {
 			req.Header.Set(
 				"X-CSRF-Token",

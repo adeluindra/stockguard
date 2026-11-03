@@ -22,7 +22,7 @@ import (
 	"github.com/adeluindra/stockguard/apps/api/internal/products"
 )
 
-const minimumSchemaVersion = 4
+const minimumSchemaVersion = 5
 
 func main() {
 	logger := slog.New(

@@ -173,19 +173,16 @@ func (s *Store) GetBalance(
 	return b, nil
 }
 
-// Adjust locks the product and inventory balance.
-// The balance update and movement insert commit together.
+// Adjust remains available for trusted internal calls.
+// External HTTP requests must use AdjustIdempotent.
 func (s *Store) Adjust(
 	ctx context.Context,
-	productID int64,
-	actorID int64,
-	delta int64,
+	productID, actorID, delta int64,
 	reason string,
 ) (AdjustmentResult, error) {
 	if productID <= 0 {
 		return AdjustmentResult{}, ErrProductNotFound
 	}
-
 	if actorID <= 0 ||
 		ValidateAdjustment(delta, reason) != nil {
 		return AdjustmentResult{}, ErrInvalidAdjustment
@@ -198,11 +195,43 @@ func (s *Store) Adjust(
 	}
 	defer tx.Rollback()
 
-	// Lock product before inventory.
-	// This also coordinates with product deactivation.
+	result, err := adjustWithinTx(
+		ctx, tx, productID, actorID, delta, reason,
+	)
+	if err != nil {
+		return AdjustmentResult{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return AdjustmentResult{},
+			fmt.Errorf("commit adjustment: %w", err)
+	}
+
+	return result, nil
+}
+
+// adjustWithinTx never commits.
+// The caller owns the transaction.
+//
+// Lock ordering is product -> inventory balance.
+// All stock changes and audit movements use this path.
+func adjustWithinTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	productID, actorID, delta int64,
+	reason string,
+) (AdjustmentResult, error) {
+	if productID <= 0 {
+		return AdjustmentResult{}, ErrProductNotFound
+	}
+	if actorID <= 0 ||
+		ValidateAdjustment(delta, reason) != nil {
+		return AdjustmentResult{}, ErrInvalidAdjustment
+	}
+
 	var active bool
 
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT is_active
 		FROM products
 		WHERE id = $1
@@ -256,13 +285,14 @@ func (s *Store) Adjust(
 			fmt.Errorf("update inventory balance: %w", err)
 	}
 
-	var movement Movement
-	movement.ProductID = productID
-	movement.ActorUserID = actorID
-	movement.MovementType = "adjustment"
-	movement.DeltaOnHand = delta
-	movement.DeltaReserved = 0
-	movement.Reason = &reason
+	movement := Movement{
+		ProductID:     productID,
+		ActorUserID:   actorID,
+		MovementType:  "adjustment",
+		DeltaOnHand:   delta,
+		DeltaReserved: 0,
+		Reason:        &reason,
+	}
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO inventory_movements (
@@ -273,11 +303,11 @@ func (s *Store) Adjust(
 			delta_reserved,
 			reason
 		)
-		VALUES (
-			$1, $2, 'adjustment', $3, 0, $4
-		)
+		VALUES ($1, $2, 'adjustment', $3, 0, $4)
 		RETURNING id, created_at
-	`, productID, actorID, delta, reason).Scan(
+	`,
+		productID, actorID, delta, reason,
+	).Scan(
 		&movement.ID,
 		&movement.CreatedAt,
 	)
@@ -287,7 +317,7 @@ func (s *Store) Adjust(
 			fmt.Errorf("insert inventory movement: %w", err)
 	}
 
-	b, err := scanBalance(
+	balance, err := scanBalance(
 		tx.QueryRowContext(ctx, balanceQuery, productID),
 	)
 	if err != nil {
@@ -295,13 +325,8 @@ func (s *Store) Adjust(
 			fmt.Errorf("read updated balance: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return AdjustmentResult{},
-			fmt.Errorf("commit adjustment: %w", err)
-	}
-
 	return AdjustmentResult{
-		Balance:  b,
+		Balance:  balance,
 		Movement: movement,
 	}, nil
 }
@@ -344,8 +369,7 @@ func scanMovement(
 func (s *Store) ListMovements(
 	ctx context.Context,
 	productID int64,
-	limit int,
-	offset int,
+	limit, offset int,
 ) (MovementPage, error) {
 	if productID <= 0 {
 		return MovementPage{}, ErrProductNotFound
@@ -401,7 +425,7 @@ func (s *Store) ListMovements(
 	}
 
 	for rows.Next() {
-		m, err := scanMovement(rows)
+		movement, err := scanMovement(rows)
 		if err != nil {
 			return MovementPage{},
 				fmt.Errorf("scan movement: %w", err)
@@ -412,7 +436,7 @@ func (s *Store) ListMovements(
 			break
 		}
 
-		page.Items = append(page.Items, m)
+		page.Items = append(page.Items, movement)
 	}
 
 	if err := rows.Err(); err != nil {

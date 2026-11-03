@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/adeluindra/stockguard/apps/api/internal/auth"
+	"github.com/adeluindra/stockguard/apps/api/internal/dashboard"
 	"github.com/adeluindra/stockguard/apps/api/internal/httpapi"
 	"github.com/adeluindra/stockguard/apps/api/internal/inventory"
 	"github.com/adeluindra/stockguard/apps/api/internal/orders"
@@ -109,9 +110,11 @@ func run(logger *slog.Logger) error {
 
 	users := auth.NewUserStore(db)
 	sessions := auth.NewSessionStore(db)
+
 	productStore := products.NewStore(db)
 	inventoryStore := inventory.NewStore(db)
 	orderStore := orders.NewService(db)
+	dashboardStore := dashboard.NewStore(db)
 
 	authHandler, err := httpapi.NewAuthHandler(
 		users,
@@ -128,13 +131,14 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.NewRouterWithAuthProductsInventoryOrders(
+		Handler: httpapi.NewRouterWithDashboard(
 			checkReady,
 			logger,
 			authHandler,
 			productStore,
 			inventoryStore,
 			orderStore,
+			dashboardStore,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -165,6 +169,7 @@ func run(logger *slog.Logger) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+
 		return fmt.Errorf("HTTP server: %w", err)
 
 	case <-ctx.Done():

@@ -30,7 +30,7 @@ func NewRouter(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 }
 
@@ -41,7 +41,7 @@ func NewRouterWithAuth(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		handlers, nil, nil, nil,
+		handlers, nil, nil, nil, nil,
 	)
 }
 
@@ -53,7 +53,7 @@ func NewRouterWithAuthAndProducts(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		handlers, productStore, nil, nil,
+		handlers, productStore, nil, nil, nil,
 	)
 }
 
@@ -66,7 +66,7 @@ func NewRouterWithAuthProductsInventory(
 ) http.Handler {
 	return newRouter(
 		checkReady, logger,
-		handlers, productStore, inventoryStore, nil,
+		handlers, productStore, inventoryStore, nil, nil,
 	)
 }
 
@@ -85,6 +85,27 @@ func NewRouterWithAuthProductsInventoryOrders(
 		productStore,
 		inventoryStore,
 		orderStore,
+		nil,
+	)
+}
+
+func NewRouterWithDashboard(
+	checkReady ReadinessCheck,
+	logger *slog.Logger,
+	handlers *AuthHandler,
+	productStore ProductService,
+	inventoryStore InventoryService,
+	orderStore OrderService,
+	dashboardStore DashboardService,
+) http.Handler {
+	return newRouter(
+		checkReady,
+		logger,
+		handlers,
+		productStore,
+		inventoryStore,
+		orderStore,
+		dashboardStore,
 	)
 }
 
@@ -95,6 +116,7 @@ func newRouter(
 	productStore ProductService,
 	inventoryStore InventoryService,
 	orderStore OrderService,
+	dashboardStore DashboardService,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -153,19 +175,33 @@ func newRouter(
 
 		if productStore != nil {
 			RegisterProductRoutes(
-				mux, handlers, productStore,
+				mux,
+				handlers,
+				productStore,
 			)
 		}
 
 		if inventoryStore != nil {
 			RegisterInventoryRoutes(
-				mux, handlers, inventoryStore,
+				mux,
+				handlers,
+				inventoryStore,
 			)
 		}
 
 		if orderStore != nil {
 			RegisterOrderRoutes(
-				mux, handlers, orderStore,
+				mux,
+				handlers,
+				orderStore,
+			)
+		}
+
+		if dashboardStore != nil {
+			RegisterDashboardRoutes(
+				mux,
+				handlers,
+				dashboardStore,
 			)
 		}
 	}
@@ -219,9 +255,7 @@ func requestLogging(
 			return
 		}
 
-		requestID := hex.EncodeToString(
-			randomBytes[:],
-		)
+		requestID := hex.EncodeToString(randomBytes[:])
 
 		w.Header().Set("X-Request-ID", requestID)
 

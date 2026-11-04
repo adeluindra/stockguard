@@ -1,62 +1,238 @@
+
 # StockGuard
 
 Inventory Reservation & Order Management System.
 
-**Project status:** Phase 3, Checkpoint DB-2 (PostgreSQL development environment only). This scaffold does **not** implement the Go API, React application, database tables, migrations, business logic, or approved acceptance criteria yet.
+StockGuard is a full-stack application for managing products,
+inventory quantities, stock reservations, orders, and audit trails.
 
-**Approved baseline:** Go + `net/http` + `database/sql`, PostgreSQL, monorepo, React + TypeScript + Vite + Tailwind CSS + TanStack Router, Docker Compose, GitHub Actions. Development will be incremental with verification at every checkpoint.
+## Project Status
 
-## Windows PowerShell quick start (one-time)
+Backend MVP: implemented, final CI verification in progress.
 
-1. Open Docker Desktop and wait until the **Engine is running**.
-2. Open PowerShell at the `stockguard` root (the directory containing `docker-compose.yml`).
-3. Copy the environment example:
+Frontend: not started.
 
-   ```powershell
-   Copy-Item .env.example .env
-   notepad .env
-   ```
+This repository is not yet approved for public production deployment.
 
-4. Replace `CHANGE_ME_TO_A_UNIQUE_LOCAL_PASSWORD` with your own local-only password. Do not commit `.env`, or share its contents/screenshots.
-5. Start the database:
+See:
+- [Project Status](docs/PROJECT_STATUS.md)
+- [API Reference](docs/API.md)
+- [Backend Release Checklist](docs/BACKEND_RELEASE_CHECKLIST.md)
 
-   ```powershell
-   docker compose config --quiet
-   docker compose up -d db
-   docker compose ps
-   ```
+## Tech Stack
 
-6. Check a real PostgreSQL connection **inside the container**:
+Backend:
+- Go (version specified in apps/api/go.mod)
+- net/http
+- database/sql with pgx
+- PostgreSQL 17
+- Docker Compose
+- golang-migrate
 
-   ```powershell
-   docker compose exec db psql -U stockguard -d stockguard_dev -c "SELECT current_database(), current_user;"
-   ```
+Frontend (planned):
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- TanStack Router
 
-7. Confirm persistent volume is attached:
+Quality:
+- Go unit and integration tests
+- PostgreSQL constraint tests
+- Concurrency regression tests
+- GitHub Actions
 
-   ```powershell
-   docker volume inspect stockguard_postgres_data --format '{{.Name}}'
-   ```
+## Repository Structure
 
-Expected service health: `healthy` after initialization. Expected query: database `stockguard_dev` and user `stockguard`. Commands are examples, not test results.
+```text
+stockguard/
+├── .github/workflows/
+├── apps/
+│   ├── api/
+│   │   ├── cmd/
+│   │   └── internal/
+│   │       ├── auth/
+│   │       ├── products/
+│   │       ├── inventory/
+│   │       ├── orders/
+│   │       ├── dashboard/
+│   │       └── httpapi/
+│   └── web/
+├── infra/postgres/
+│   ├── migrations/
+│   └── tests/
+├── scripts/
+├── docs/
+├── docker-compose.yml
+└── .env.example
+```
 
-## Daily workflow
+## Local Requirements
 
-1. Start Docker Desktop (Docker engine must be available).
-2. From this repository's root run `docker compose up -d db` if it has not automatically started.
-3. Verify with `docker compose ps`.
-4. If desired, stop without deleting the volume using `docker compose stop db`.
+- Windows with PowerShell
+- Docker Desktop with running engine
+- Go matching apps/api/go.mod
+- golang-migrate CLI
+- Git
 
-Never use `docker compose down -v` or `docker volume rm stockguard_postgres_data` as part of ordinary development. Those commands delete persisted database data.
+## Local Development
 
-The database is reachable from **this Windows host only** at `127.0.0.1:5433`. Future host-run Go backend configuration will use this port; API containers use the Docker service name `db` and container port `5432` instead.
+Run from the repository root.
 
-**Important:** Initial `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` are applied to an empty Postgres data directory. Changing `.env` after the volume has already been initialized does not automatically change existing database credentials. Never remove volumes just to fix an environment mismatch; inspect the root cause.
+### 1. Configure environment
 
-## What's next?
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
 
-DB-3: approve a concrete migration tool, create versioned migration files for the eight approved tables, and verify constraints on a separate test PostgreSQL database. The monorepo subdirectories currently contain only placeholders.
+Set a unique local PostgreSQL password.
 
-## Project design references
+Never commit .env.
 
-See `docs/PROJECT_STATUS.md`. The approved PRD and architecture decisions were agreed in the conversation, but **this starter is not a replacement for the full approved PRD**. Before DB-3, include the exact approved PRD and Amendment A in source-controlled documentation.
+### 2. Start PostgreSQL
+
+```powershell
+docker compose up -d --wait db
+docker compose ps
+```
+
+Default Windows host port: 5433.
+
+The port is bound to 127.0.0.1 by Docker Compose.
+
+### 3. Apply database migrations
+
+All five migrations must be applied before starting the API.
+
+Use the golang-migrate CLI with the connection string
+derived from your local .env.
+
+Use a relative migration path from the repository root:
+
+```powershell
+migrate -path "infra/postgres/migrations" -database "<local-postgres-dsn>" up
+```
+
+Do not copy the placeholder literally. Replace it with your
+locally constructed PostgreSQL DSN.
+
+Do not publish your DSN because it contains credentials.
+
+Verify:
+
+```powershell
+docker compose exec -T db psql -U stockguard -d stockguard_dev -Atc "SELECT version, dirty FROM schema_migrations;"
+```
+
+Expected schema state: version 5, dirty=false.
+
+Never use `migrate force` to hide a failed migration.
+
+### 4. Start the API
+
+```powershell
+.\scripts\start-api.ps1
+```
+
+Local API: http://127.0.0.1:8080
+
+Health:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/healthz
+Invoke-RestMethod http://127.0.0.1:8080/readyz
+```
+
+### 5. Run Go tests
+
+From the repository root:
+
+```powershell
+cd apps/api
+
+go mod verify
+go vet ./...
+go test ./... -count=1
+```
+
+PostgreSQL integration tests require TEST_DATABASE_URL pointing
+to the separate `stockguard_test` database.
+
+Without TEST_DATABASE_URL, integration tests may be skipped.
+
+For complete regression coverage:
+
+```powershell
+go test -p 1 ./... -count=1
+```
+
+Run this with a valid TEST_DATABASE_URL.
+
+Do not run database tests against stockguard_dev or production.
+
+## Main Features
+
+- Admin and Staff authentication
+- Session and CSRF protection
+- Staff account administration
+- Product management
+- Stock adjustments
+- Stock reservation
+- Order fulfillment and cancellation
+- Order ownership-based access
+- Inventory movement audit trail
+- Dashboard and low-stock reporting
+- Idempotent stock-changing requests
+
+## Inventory Rules
+
+```text
+available = on_hand - reserved
+0 <= reserved <= on_hand
+```
+
+All inventory-changing workflows use PostgreSQL transactions.
+
+The inventory movement history records committed quantity changes.
+
+## API Documentation
+
+See [docs/API.md](docs/API.md).
+
+All protected write operations require authentication and CSRF.
+
+Order creation and stock adjustment also require an
+Idempotency-Key header.
+
+## CI
+
+GitHub Actions workflow:
+`.github/workflows/backend-ci.yml`
+
+Jobs:
+- go-checks
+- postgres-integration
+
+The workflow runs on pushes, pull requests, and manual dispatch.
+
+The integration job uses disposable PostgreSQL credentials.
+No real database or production secrets are needed.
+
+## Security
+
+- Never commit .env or credential files
+- Never log passwords or session tokens
+- Use HTTPS and Secure cookies in production
+- Restrict database network exposure
+- Maintain backups before production migrations
+- Review the backend release checklist before deployment
+
+## Roadmap
+
+1. Complete BE-7C CI and final verification
+2. Start FE-1 frontend foundation
+3. Integrate authentication, products, inventory, and orders
+4. Run frontend and end-to-end tests
+5. Prepare a separate staging and production release
+```

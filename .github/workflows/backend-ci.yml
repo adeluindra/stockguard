@@ -1,0 +1,119 @@
+
+name: StockGuard Backend CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Check gofmt
+        run: |
+          unformatted="$(find . -name '*.go' -type f -print0 | xargs -0 -r gofmt -l)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted Go files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Compile packages
+        run: go build ./...
+
+      - name: Race tests without database
+        env:
+          TEST_DATABASE_URL: ""
+        run: go test -race -p 1 ./... -count=1 -timeout=10m
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: stockguard
+          POSTGRES_PASSWORD: stockguard_ci_only
+          POSTGRES_DB: stockguard_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stockguard -d stockguard_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      TEST_DATABASE_URL: postgres://stockguard:stockguard_ci_only@127.0.0.1:5432/stockguard_test?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Apply migrations 1-5
+        run: |
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE/infra/postgres/migrations:/migrations:ro" \
+            migrate/migrate:v4.19.1 \
+            -path /migrations -database "$TEST_DATABASE_URL" up
+
+      - name: Verify schema and SQL constraints
+        run: |
+          docker run --rm --network host \
+            -e PGPASSWORD=stockguard_ci_only \
+            -v "$GITHUB_WORKSPACE/infra/postgres/tests:/tests:ro" \
+            postgres:17-alpine sh -euc '
+              version="$(psql -h 127.0.0.1 -U stockguard -d stockguard_test -X -v ON_ERROR_STOP=1 -Atc "SELECT version FROM schema_migrations WHERE dirty = FALSE;")"
+              test "$version" = "5"
+              for file in /tests/*.sql; do
+                echo "Checking $file"
+                psql -h 127.0.0.1 -U stockguard -d stockguard_test -X -v ON_ERROR_STOP=1 -f "$file"
+              done
+            '
+
+      - name: Run Go integration and regression tests
+        working-directory: apps/api
+        run: |
+          set -o pipefail
+          go test -p 1 -v -count=1 -timeout=10m ./... | tee /tmp/stockguard-go-tests.log
+          grep -q '^--- PASS: TestAdjustmentIdempotencyPostgres' /tmp/stockguard-go-tests.log
+          grep -q '^--- PASS: TestCrossWorkflowConcurrencyPostgres' /tmp/stockguard-go-tests.log
+          grep -q '^--- PASS: TestDashboardPostgres' /tmp/stockguard-go-tests.log

@@ -1,26 +1,104 @@
-# StockGuard — Project status
 
-- Phase 0: Discovery approved — one store, one warehouse, Admin/Staff, manual orders, automatic reservations.
-- Phase 1: PRD v1.0 approved.
-- Phase 2: SD-1..SD-4 and ADR-001..ADR-035 approved.
-- Phase 3 DB-1: approved by user's instruction to accept recommendations and start implementation; candidate eight-table design.
-- Phase 3 DB-2: starter PostgreSQL environment, **not yet verified on the user's computer**.
+# StockGuard — Project Status
 
-## Product invariants (approved)
+Last reviewed: 2026-11-03
+Current checkpoint: BE-7C
 
-- `available = on_hand - reserved`
-- `0 <= reserved <= on_hand`
-- Order states: `reserved`, `fulfilled`, `cancelled`
-- Create order reserves all items atomically or none.
-- Fulfillment decreases both `on_hand` and `reserved` for all items exactly once.
-- Cancellation decreases `reserved` only.
-- Each successful create-order idempotency key maps to one valid order.
-- Every committed inventory balance mutation has an associated movement in the same transaction.
+## Project Scope
 
-## Design entities
+StockGuard is an inventory reservation and order management
+system for one store and one warehouse.
 
-`users`, `sessions`, `products`, `inventory_balances`, `orders`, `order_items`, `inventory_movements`, `idempotency_records`.
+Roles:
+- Admin
+- Staff
 
-## Caution
+Order states:
+- reserved
+- fulfilled
+- cancelled
 
-The full PRD, PRD Amendment A, detailed API contracts, and ERD must be transferred verbatim from approved source documents before implementing related domain behavior. This status summary does not supersede those documents.
+## Implementation Progress
+
+| Phase | Scope | Status |
+|---|---|---|
+| BE-1 | API foundation and PostgreSQL | Implemented |
+| BE-2 | Authentication, sessions, CSRF and RBAC | Implemented |
+| BE-3 | Product management | Implemented |
+| BE-4 | Inventory adjustment and audit trail | Implemented |
+| BE-5A | Order creation and reservations | Implemented |
+| BE-5B | Fulfillment and cancellation | Implemented |
+| BE-5C | Order queries and access scoping | Implemented |
+| BE-6 | Dashboard and reporting | Implemented |
+| BE-7A | Adjustment idempotency | Implemented |
+| BE-7B | Security and concurrency regression tests | Implemented |
+| BE-7C | CI, documentation and release verification | In progress |
+| FE-1 | Frontend foundation | Not started |
+
+Backend test results have been reported as passing locally.
+GitHub Actions execution must be verified separately.
+
+## Technology Stack
+
+Backend:
+- Go, net/http, database/sql
+- PostgreSQL 17
+- pgx driver
+- golang-migrate
+- Docker Compose
+
+Frontend target:
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- TanStack Router
+
+## Database
+
+Current expected schema version: 5
+
+Core entities:
+- users
+- sessions
+- products
+- inventory_balances
+- orders
+- order_items
+- inventory_movements
+- idempotency_records
+- inventory_adjustment_idempotency
+
+## Product Invariants
+
+- available = on_hand - reserved
+- 0 <= reserved <= on_hand
+- Creating an order reserves every item atomically
+- Fulfillment decreases on_hand and reserved
+- Cancellation decreases reserved only
+- Terminal order actions cannot double-apply changes
+- Every committed stock mutation has an audit movement
+- Repeated successful requests with the same idempotency
+  key must not duplicate their stock effects
+
+## Documentation
+
+- API reference: docs/API.md
+- Release checklist: docs/BACKEND_RELEASE_CHECKLIST.md
+- Local setup: README.md
+
+## Documentation Gaps
+
+The previously approved PRD, amendments, design documents,
+and ADRs should be transferred or linked to authoritative
+repository documentation.
+
+Do not treat this status summary as a replacement for them.
+
+## Next Milestone
+
+1. Verify go-checks and postgres-integration in GitHub Actions.
+2. Review backend release checklist.
+3. Start FE-1 after backend integration criteria pass.
+
+Public production deployment is a separate milestone.

@@ -1,0 +1,31 @@
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+const backendURL = 'http://127.0.0.1:8080'
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+
+    proxy: {
+      '/api': {
+        target: backendURL,
+        changeOrigin: true,
+      },
+      '/healthz': {
+        target: backendURL,
+        changeOrigin: true,
+      },
+      '/readyz': {
+        target: backendURL,
+        changeOrigin: true,
+      },
+    },
+  },
+})

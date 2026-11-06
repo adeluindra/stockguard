@@ -15,6 +15,8 @@ import {
 } from './components/auth-guards'
 
 import { OverviewPage } from './pages/overview-page'
+import { ProductsPage } from './pages/products-page'
+import { InventoryPage } from './pages/inventory-page'
 import { SectionPage } from './pages/section-page'
 import { NotFoundPage } from './pages/not-found-page'
 
@@ -56,25 +58,13 @@ const overviewRoute = createRoute({
 const productsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'products',
-  component: () => (
-    <SectionPage
-      title="Products"
-      description="Pengelolaan katalog, SKU, metadata produk, dan status aktif."
-      nextPhase="FE-4"
-    />
-  ),
+  component: ProductsPage,
 })
 
 const inventoryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'inventory',
-  component: () => (
-    <SectionPage
-      title="Inventory"
-      description="Monitoring on-hand, reserved, available stock, dan audit movements."
-      nextPhase="FE-4"
-    />
-  ),
+  component: InventoryPage,
 })
 
 const ordersRoute = createRoute({

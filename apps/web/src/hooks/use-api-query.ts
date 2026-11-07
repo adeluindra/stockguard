@@ -1,16 +1,31 @@
 
 import { useEffect, useState } from 'react'
-import { ApiRequestError, getApiResponse } from '../lib/api'
+
+import {
+  ApiRequestError,
+  getApiResponse,
+} from '../lib/api'
+
 import type { ApiResponse } from '../lib/api'
 
 export type ApiQueryState<T> =
-  | { status: 'loading' }
-  | { status: 'ready'; response: ApiResponse<T> }
+  | {
+      status: 'loading'
+    }
+  | {
+      status: 'ready'
+      response: ApiResponse<T>
+    }
   | {
       status: 'error'
       message: string
       httpStatus: number | null
     }
+
+interface QuerySnapshot<T> {
+  key: string
+  value: ApiQueryState<T>
+}
 
 export function useApiQuery<T>(
   path: string,
@@ -18,51 +33,59 @@ export function useApiQuery<T>(
 ): ApiQueryState<T> {
   const key = `${path}\u0000${revision}`
 
-  const [snapshot, setSnapshot] = useState<{
-    key: string
-    value: ApiQueryState<T>
-  }>({
-    key,
-    value: { status: 'loading' },
-  })
+  const [snapshot, setSnapshot] =
+    useState<QuerySnapshot<T>>({
+      key,
+      value: {
+        status: 'loading',
+      },
+    })
 
   useEffect(() => {
     const controller = new AbortController()
-
-    setSnapshot({
-      key,
-      value: { status: 'loading' },
-    })
 
     if (!path) {
       return () => controller.abort()
     }
 
-    void getApiResponse<T>(path, controller.signal)
+    void getApiResponse<T>(
+      path,
+      controller.signal,
+    )
       .then((response) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted) {
+          return
+        }
 
         setSnapshot({
           key,
-          value: { status: 'ready', response },
+          value: {
+            status: 'ready',
+            response,
+          },
         })
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted) {
+          return
+        }
 
         const httpStatus =
           error instanceof ApiRequestError
             ? error.status
             : null
 
-        let message = 'Gagal mengambil data dari server.'
+        let message =
+          'Gagal mengambil data dari server.'
 
         if (httpStatus === 401) {
-          message = 'Sesi tidak valid. Silakan periksa login.'
+          message =
+            'Sesi tidak valid. Silakan periksa login.'
         } else if (httpStatus === 403) {
           message = 'Akses tidak diizinkan.'
         } else if (httpStatus === 503) {
-          message = 'Backend atau database tidak tersedia.'
+          message =
+            'Backend atau database tidak tersedia.'
         } else if (error instanceof Error) {
           message = error.message
         }
@@ -77,12 +100,17 @@ export function useApiQuery<T>(
         })
       })
 
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+    }
   }, [key, path])
 
-  // Jangan tampilkan respons dari URL/revision sebelumnya.
+  // Respons dari request sebelumnya tidak
+  // boleh tampil untuk URL/revision yang baru.
   if (snapshot.key !== key) {
-    return { status: 'loading' }
+    return {
+      status: 'loading',
+    }
   }
 
   return snapshot.value

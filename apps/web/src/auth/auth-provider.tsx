@@ -24,6 +24,35 @@ interface AuthProviderProps {
   children: ReactNode
 }
 
+// Hanya membaca sesi dan mengembalikan state.
+// Tidak melakukan setState di dalam fungsi ini.
+async function readSessionState(
+  signal?: AbortSignal,
+): Promise<AuthState> {
+  try {
+    const session = await getCurrentSession(signal)
+
+    return {
+      status: 'authenticated',
+      session,
+    }
+  } catch (error) {
+    if (
+      error instanceof ApiRequestError &&
+      error.status === 401
+    ) {
+      return {
+        status: 'anonymous',
+      }
+    }
+
+    return {
+      status: 'error',
+      message: authErrorMessage(error),
+    }
+  }
+}
+
 export function AuthProvider({
   children,
 }: AuthProviderProps) {
@@ -31,57 +60,47 @@ export function AuthProvider({
     status: 'loading',
   })
 
-  const loadSession = useCallback(
-    async (signal?: AbortSignal): Promise<void> => {
-      setState({ status: 'loading' })
-
-      try {
-        const session = await getCurrentSession(signal)
-
-        if (!signal?.aborted) {
-          setState({
-            status: 'authenticated',
-            session,
-          })
-        }
-      } catch (error) {
-        if (signal?.aborted) return
-
-        if (
-          error instanceof ApiRequestError &&
-          error.status === 401
-        ) {
-          setState({ status: 'anonymous' })
-          return
-        }
-
-        setState({
-          status: 'error',
-          message: authErrorMessage(error),
-        })
-      }
-    },
-    [],
-  )
-
+  // Verifikasi sesi saat aplikasi pertama dibuka.
   useEffect(() => {
     const controller = new AbortController()
 
-    void loadSession(controller.signal)
+    void readSessionState(controller.signal).then(
+      (nextState) => {
+        // Jangan memperbarui state bila effect
+        // sudah dibersihkan atau request dibatalkan.
+        if (controller.signal.aborted) {
+          return
+        }
 
-    return () => controller.abort()
-  }, [loadSession])
+        setState(nextState)
+      },
+    )
 
+    return () => {
+      controller.abort()
+    }
+  }, [])
+
+  // Refresh dipicu oleh aksi aplikasi.
   const refresh = useCallback(async () => {
-    await loadSession()
-  }, [loadSession])
+    setState({
+      status: 'loading',
+    })
+
+    const nextState = await readSessionState()
+
+    setState(nextState)
+  }, [])
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (
+      username: string,
+      password: string,
+    ) => {
       await loginOnServer(username, password)
 
       try {
-        // Read the authoritative session after login.
+        // Backend adalah sumber kebenaran sesi.
         const session = await getCurrentSession()
 
         setState({
@@ -95,7 +114,9 @@ export function AuthProvider({
           error instanceof ApiRequestError &&
           error.status === 401
         ) {
-          setState({ status: 'anonymous' })
+          setState({
+            status: 'anonymous',
+          })
         } else {
           setState({
             status: 'error',
@@ -113,7 +134,7 @@ export function AuthProvider({
     try {
       await logoutOnServer()
     } catch (error) {
-      // A missing/expired session is already logged out.
+      // Sesi yang sudah tidak valid dianggap logout.
       if (
         !(error instanceof ApiRequestError) ||
         error.status !== 401
@@ -122,7 +143,9 @@ export function AuthProvider({
       }
     }
 
-    setState({ status: 'anonymous' })
+    setState({
+      status: 'anonymous',
+    })
   }, [])
 
   const changePassword = useCallback(
@@ -135,9 +158,11 @@ export function AuthProvider({
         newPassword,
       )
 
-      // Backend revokes every session and clears
-      // the browser cookie after a successful change.
-      setState({ status: 'anonymous' })
+      // Backend mencabut seluruh sesi setelah
+      // password berhasil diganti.
+      setState({
+        status: 'anonymous',
+      })
     },
     [],
   )

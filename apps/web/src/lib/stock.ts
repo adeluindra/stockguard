@@ -61,6 +61,18 @@ export const MOVEMENT_PAGE_SIZE = 10
 
 export const formatQuantity = new Intl.NumberFormat('id-ID')
 
+function containsControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+
+    if (code <= 0x1f || code === 0x7f) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export function safeInteger(
   raw: string,
   allowNegative = false,
@@ -75,7 +87,9 @@ export function safeInteger(
     !Number.isSafeInteger(value) ||
     (!allowNegative && value < 0)
   ) {
-    throw new Error('Jumlah di luar batas angka yang didukung.')
+    throw new Error(
+      'Jumlah di luar batas angka yang didukung.',
+    )
   }
 
   return value
@@ -92,7 +106,7 @@ export function validateProductForm(
     Array.from(sku).length < 3 ||
     Array.from(sku).length > 64 ||
     /\s/u.test(sku) ||
-    /[\u0000-\u001F\u007F]/u.test(sku)
+    containsControlCharacter(sku)
   ) {
     throw new Error(
       'SKU harus 3–64 karakter tanpa spasi atau karakter kontrol.',
@@ -103,9 +117,11 @@ export function validateProductForm(
     name !== name.trim() ||
     Array.from(name).length < 1 ||
     Array.from(name).length > 200 ||
-    /[\u0000-\u001F\u007F]/u.test(name)
+    containsControlCharacter(name)
   ) {
-    throw new Error('Nama produk harus 1–200 karakter yang valid.')
+    throw new Error(
+      'Nama produk harus 1–200 karakter yang valid.',
+    )
   }
 
   if (
@@ -118,8 +134,10 @@ export function validateProductForm(
   return {
     sku,
     name,
-    description: description === '' ? null : description,
-    low_stock_threshold: safeInteger(values.threshold),
+    description:
+      description === '' ? null : description,
+    low_stock_threshold:
+      safeInteger(values.threshold),
   }
 }
 
@@ -137,7 +155,7 @@ export function validateAdjustment(
     reason !== reason.trim() ||
     Array.from(reason).length < 10 ||
     Array.from(reason).length > 500 ||
-    /[\u0000-\u001F\u007F]/u.test(reason)
+    containsControlCharacter(reason)
   ) {
     throw new Error(
       'Alasan harus 10–500 karakter tanpa spasi di awal/akhir.',

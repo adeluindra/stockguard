@@ -1,0 +1,30 @@
+
+name: stockguard-e2e
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: "no"
+
+    environment:
+      POSTGRES_USER: stockguard_e2e
+      POSTGRES_PASSWORD: stockguard_e2e_local_only
+      POSTGRES_DB: stockguard_e2e
+
+    ports:
+      - "127.0.0.1:5434:5432"
+
+    volumes:
+      - e2e_pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U stockguard_e2e -d stockguard_e2e
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  e2e_pgdata:

@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router'
 
 import { RootLayout } from './components/root-layout'
+
 import {
   AdminOnly,
   LoginRoute,
@@ -17,6 +18,7 @@ import {
 import { OverviewPage } from './pages/overview-page'
 import { ProductsPage } from './pages/products-page'
 import { InventoryPage } from './pages/inventory-page'
+import { OrdersPage } from './pages/orders-page'
 import { SectionPage } from './pages/section-page'
 import { NotFoundPage } from './pages/not-found-page'
 
@@ -28,7 +30,12 @@ const rootRoute = createRootRoute({
 const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: () => <Navigate to="/app" replace />,
+  component: () => (
+    <Navigate
+      to="/app"
+      replace
+    />
+  ),
 })
 
 const loginRoute = createRoute({
@@ -70,13 +77,7 @@ const inventoryRoute = createRoute({
 const ordersRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'orders',
-  component: () => (
-    <SectionPage
-      title="Orders"
-      description="Pembuatan order, reservasi barang, fulfillment, dan cancellation."
-      nextPhase="FE-5"
-    />
-  ),
+  component: OrdersPage,
 })
 
 const staffRoute = createRoute({

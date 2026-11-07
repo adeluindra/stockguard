@@ -19,7 +19,7 @@ import { OverviewPage } from './pages/overview-page'
 import { ProductsPage } from './pages/products-page'
 import { InventoryPage } from './pages/inventory-page'
 import { OrdersPage } from './pages/orders-page'
-import { SectionPage } from './pages/section-page'
+import { StaffPage } from './pages/staff-page'
 import { NotFoundPage } from './pages/not-found-page'
 
 const rootRoute = createRootRoute({
@@ -31,10 +31,7 @@ const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: () => (
-    <Navigate
-      to="/app"
-      replace
-    />
+    <Navigate to="/app" replace />
   ),
 })
 
@@ -85,11 +82,7 @@ const staffRoute = createRoute({
   path: 'staff',
   component: () => (
     <AdminOnly>
-      <SectionPage
-        title="Team"
-        description="Manajemen akun Staff untuk administrator."
-        nextPhase="FE-6"
-      />
+      <StaffPage />
     </AdminOnly>
   ),
 })
